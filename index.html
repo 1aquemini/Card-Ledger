@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Card Ledger — Inventory & Scanner</title>
+
+  <link rel="manifest" href="./manifest.json">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-512-new.png">
+
+  <style>
+    :root{
+      --bg:#0f1720;
+      --card:#0b1220;
+      --accent:#7c3aed;
+      --muted:#94a3b8;
+      --surface:#0b1220;
+      --success:#10b981;
+      --danger:#ef4444;
+      --glass: rgba(255,255,255,0.03);
+      --radius:12px;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      color-scheme: dark;
+    }
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#071018 0%, #071a12 100%);color:#e6eef6;}
+    .wrap{max-width:980px;margin:18px auto;padding:18px;}
+    header{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+    header h1{font-size:20px;margin:0;}
+    header p{margin:0;color:var(--muted);font-size:13px;}
+    .panel{background:var(--glass);border-radius:var(--radius);padding:14px;margin-bottom:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6);}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;}
+    .btn{
+      background:var(--accent);border:none;color:#fff;padding:10px 12px;border-radius:10px;font-weight:700;cursor:pointer;
+      display:inline-flex;align-items:center;gap:8px;
+    }
+    .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);font-weight:600;}
+    .btn.warn{background:#f59e0b;color:#071018;}
+    .btn.danger{background:var(--danger);}
+    .btn:disabled{opacity:0.45;cursor:not-allowed;}
+    .status{display:flex;align-items:center;gap:10px;margin-top:10px;}
+    .status-dot{width:12px;height:12px;border-radius:50%;background:#9ca3af;box-shadow:0 0 6px rgba(0,0,0,0.6);}
+    .status-text{font-weight:700;color:var(--muted);font-size:13px;}
+    #reader{width:100%;max-width:640px;height:360px;background:#000;border-radius:10px;overflow:hidden;margin-top:12px;display:none;}
+    .grid{display:grid;grid-template-columns:1fr 360px;gap:12px;}
+    @media (max-width:900px){ .grid{grid-template-columns:1fr; } #reader{height:320px;} }
+    table{width:100%;border-collapse:collapse;font-size:13px;}
+    th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.03);text-align:left;}
+    th{color:var(--muted);font-weight:700;font-size:12px;}
+    .small{font-size:12px;color:var(--muted);}
+    .row-actions{display:flex;gap:6px;}
+    input[type="file"]{display:none;}
+    .file-label{display:inline-block;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03);cursor:pointer;color:var(--muted);font-weight:600;}
+    .search{width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit;margin-bottom:10px;}
+    .muted{color:var(--muted);}
+    footer{margin-top:18px;color:var(--muted);font-size:12px;text-align:center;}
+    .help{font-size:13px;color:var(--muted);margin-top:8px;}
+    .chip{display:inline-block;padding:6px 8px;border-radius:999px;background:rgba(255,255,255,0.03);font-weight:700;color:var(--muted);font-size:12px;}
+    .empty{padding:18px;border-radius:10px;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));text-align:center;color:var(--muted);}
+    .table-scroll{max-height:420px;overflow:auto;border-radius:8px;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div style="width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,#7c3aed,#06b6d4);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:20px;">
+        CL
+      </div>
+      <div>
+        <h1>Card Ledger</h1>
+        <p>Inventory, quick scanner, CSV import/export — works as a PWA on iPhone and desktop.</p>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div class="controls">
+            <button id="startBtn" class="btn">Start Scanner</button>
+            <button id="stopBtn" class="btn ghost" disabled>Stop Scanner</button>
+            <button id="reconnectBtn" class="btn warn">Reconnect</button>
+            <button id="toggleOverlayBtn" class="btn ghost">Toggle Overlay</button>
+          </div>
+          <div class="status">
+            <div id="statusDot" class="status-dot"></div>
+            <div id="statusText" class="status-text">Idle</div>
+            <div><span id="cameraLabel" class="chip">No camera</span></div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center;">
+          <label class="file-label" for="importCsv">Import CSV</label>
+          <input id="importCsv" type="file" accept=".csv,text/csv" />
+          <button id="exportCsvBtn" class="btn">Export CSV</button>
+        </div>
+      </div>
+
+      <div id="reader"></div>
+
+      <div class="help">
+        <span class="muted">Tip:</span> Add this page to your iPhone Home Screen (Safari → Share → Add to Home Screen) for camera access and PWA behavior.
+      </div>
+    </section>
+
+    <div class="grid">
+      <main class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div>
+            <strong>Collection</strong>
+            <div class="small muted">Saved locally in your browser (localStorage)</div>
+          </div>
+          <div>
+            <input id="searchInput" class="search" placeholder="Search name, set, or code..." style="width:320px;" />
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table id="collectionTable">
+            <thead>
+              <tr>
+                <th style="width:40%;">Name</th>
+                <th style="width:12%;">Qty</th>
+                <th style="width:14%;">Price</th>
+                <th style="width:18%;">Total</th>
+                <th style="width:16%;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="collectionBody"></tbody>
+          </table>
+        </div>
+
+        <div id="collectionEmpty" class="empty" style="display:none;margin-top:12px;">
+          No cards yet. Use the scanner or import a CSV to populate your collection.
+        </div>
+      </main>
+
+      <aside class="panel">
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div>
+            <strong>Last Scanned</strong>
+            <div id="lastScanned" class="small muted">—</div>
+          </div>
+
+          <div>
+            <strong>Session Info</strong>
+            <div class="small muted" id="sessionInfo">Not connected</div>
+          </div>
+
+          <div>
+            <strong>Quick Actions</strong>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <button id="addManualBtn" class="btn ghost">Add Manually</button>
+              <button id="clearAllBtn" class="btn danger">Clear All</button>
+            </div>
+          </div>
+
+          <div>
+            <strong>Import / Export</strong>
+            <div class="small muted" style="margin-top:6px;">
+              Export creates a CSV backup you can move between devices. Import merges rows.
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <footer>
+      <div>Card Ledger • Local-only storage • No accounts • No payments</div>
+    </footer>
+  </div>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+
+  <script>
+    const STORAGE_KEY = 'cardLedgerCollection_v1';
+    const SCAN_CONFIG = { fps: 10, qrbox: { width: 250, height: 250 } };
+    const MAX_RECONNECT_ATTEMPTS = 6;
+    const RECONNECT_BASE_MS = 700;
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const reconnectBtn = document.getElementById('reconnectBtn');
+    const toggleOverlayBtn = document.getElementById('toggleOverlayBtn');
+    const readerEl = document.getElementById('reader');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const cameraLabel = document.getElementById('cameraLabel');
+    const collectionBody = document.getElementById('collectionBody');
+    const collectionEmpty = document.getElementById('collectionEmpty');
+    const lastScanned = document.getElementById('lastScanned');
+    const sessionInfo = document.getElementById('sessionInfo');
+    const exportCsvBtn = document.getElementById('exportCsvBtn');
+    const importCsvInput = document.getElementById('importCsv');
+    const searchInput = document.getElementById('searchInput');
+    const addManualBtn = document.getElementById('addManualBtn');
+    const clearAllBtn = document.getElementById('clearAllBtn');
+
+    let scanner = null;
+    let isStarting = false;
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+    let overlayVisible = true;
+    let collection = [];
+
+    function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+    function setStatus(text, color) {
+      statusText.textContent = text;
+      statusDot.style.background = color || '#9ca3af';
+    }
+    function saveCollection() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(collection)); }
+      catch (e) { console.error('Save failed', e); }
+    }
+    function loadCollection() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        collection = raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        console.error('Load failed', e);
+        collection = [];
+      }
+    }
+    function formatCurrency(n) {
+      if (n === '' || n === null || isNaN(Number(n))) return '-';
+      return Number(n).toLocaleString(undefined, { style:'currency', currency:'USD', maximumFractionDigits:2 });
+    }
+    function computeTotal(item) {
+      const q = Number(item.qty) || 0;
+      const p = Number(item.price) || 0;
+      return +(q * p).toFixed(2);
+    }
+
+    function escapeHtml(s) {
+      if (!s) return '';
+      return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]);
+    }
+
+    function renderCollection(filter = '') {
+      collectionBody.innerHTML = '';
+      const rows = collection.filter(item => {
+        if (!filter) return true;
+        const f = filter.toLowerCase();
+        return (item.name || '').toLowerCase().includes(f) ||
+               (item.meta || '').toLowerCase().includes(f) ||
+               (item.id || '').toLowerCase().includes(f);
+      });
+      collectionEmpty.style.display = rows.length ? 'none' : 'block';
+      rows.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><div style="font-weight:700">${escapeHtml(item.name || '(untitled)')}</div><div class="small muted">${escapeHtml(item.meta || '')}</div></td>
+          <td>${escapeHtml(String(item.qty || 1))}</td>
+          <td>${formatCurrency(item.price)}</td>
+          <td>${formatCurrency(computeTotal(item))}</td>
+          <td>
+            <div class="row-actions">
+              <button class="btn ghost" data-action="edit" data-id="${item.id}">Edit</button>
+              <button class="btn ghost" data-action="dup" data-id="${item.id}">Dup</button>
+              <button class="btn danger" data-action="del" data-id="${item.id}">Delete</button>
+            </div>
+          </td>
+        `;
+        collectionBody.appendChild(tr);
+      });
+    }
+
+    function addItem(item, save = true) {
+      const row = Object.assign({
+        id: uid(),
+        name: '',
+        qty: 1,
+        price: 0,
+        meta: '',
+        scannedAt: new Date().toISOString()
+      }, item);
+      collection.unshift(row);
+      if (save) saveCollection();
+      renderCollection(searchInput.value);
+      return row;
+    }
+
+    function updateItem(id, patch) {
+      const idx = collection.findIndex(r => r.id === id);
+      if (idx === -1) return null;
+      collection[idx] = Object.assign({}, collection[idx], patch);
+      saveCollection();
+      renderCollection(searchInput.value);
+      return collection[idx];
+    }
+
+    function deleteItem(id) {
+      collection = collection.filter(r => r.id !== id);
+      saveCollection();
+      renderCollection(searchInput.value);
+    }
+
+    function duplicateItem(id) {
+      const src = collection.find(r => r.id === id);
+      if (!src) return;
+      const copy = Object.assign({}, src, { id: uid(), scannedAt: new Date().toISOString() });
+      collection.unshift(copy);
+      saveCollection();
+      renderCollection(searchInput.value);
+    }
+
+    function csvEscape(s) {
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return '"' + s.replace(/"/g,'""') + '"';
+      }
+      return s;
+    }
+
+    function exportCSV() {
+      if (!collection.length) {
+        alert('No items to export.');
+        return;
+      }
+      const header = ['id','name','qty','price','meta','scannedAt'];
+      const rows = collection.map(r => header.map(h => csvEscape(String(r[h] ?? ''))).join(','));
+      const csv = [header.join(','), ...rows].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'card-ledger-export.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function parseCSV(text) {
+      const rows = [];
+      let cur = [];
+      let i = 0;
+      let field = '';
+      let inQuotes = false;
+      while (i < text.length) {
+        const ch = text[i];
+        if (inQuotes) {
+          if (ch === '"') {
+            if (text[i+1] === '"') { field += '"'; i += 2; continue; }
+            inQuotes = false; i++; continue;
+          } else { field += ch; i++; continue; }
+        } else {
+          if (ch === '"') { inQuotes = true; i++; continue; }
+          if (ch === ',') { cur.push(field); field = ''; i++; continue; }
+          if (ch === '\r') { i++; continue; }
+          if (ch === '\n') { cur.push(field); rows.push(cur); cur = []; field = ''; i++; continue; }
+          field += ch; i++;
+        }
+      }
+      if (field !== '' || cur.length) { cur.push(field); rows.push(cur); }
+      return rows;
+    }
+
+    function importCSVFile(file) {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const text = e.target.result;
+        const parsed = parseCSV(text);
+        const header = parsed[0].map(h => h.trim().toLowerCase());
+        const rows = parsed.slice(1);
+        let added = 0;
+        rows.forEach(cols => {
+          const obj = {};
+          header.forEach((h,i) => obj[h] = cols[i] ?? '');
+          if (obj.id) {
+            const existing = collection.find(r => r.id === obj.id);
+            if (existing) {
+              updateItem(obj.id, {
+                name: obj.name || existing.name,
+                qty: Number(obj.qty) || existing.qty,
+                price: Number(obj.price) || existing.price,
+                meta: obj.meta || existing.meta
+              });
+            } else {
+              addItem({
+                id: obj.id,
+                name: obj.name,
+                qty: Number(obj.qty) || 1,
+                price: Number(obj.price) || 0,
+                meta: obj.meta || '',
+                scannedAt: obj.scannedAt || new Date().toISOString()
+              }, true);
+              added++;
+            }
+          } else {
+            addItem({
+              name: obj.name,
+              qty: Number(obj.qty) || 1,
+              price: Number(obj.price) || 0,
+              meta: obj.meta || ''
+            }, true);
+            added++;
+          }
+        });
+        alert('Import complete. Rows added: ' + added);
+      };
+      reader.readAsText(file);
+    }
+
+    async function startScanner() {
+      if (scanner || isStarting) return;
+      isStarting = true;
+      setStatus('Starting camera...', '#f59e0b');
+      try {
+        await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      } catch (err) {
+        setStatus('Permission denied or no camera', '#ef4444');
+        cameraLabel.textContent = 'No camera';
+        isStarting = false;
+        return;
+      }
+      readerEl.style.display = overlayVisible ? 'block' : 'none';
+      try {
+        scanner = new Html5Qrcode("reader");
+        await scanner.start(
+          { facingMode: "environment" },
+          SCAN_CONFIG,
+          onScanSuccess,
+          onScanError
+        );
+        setStatus('Camera active', '#10b981');
+        cameraLabel.textContent = 'Camera: active';
+        reconnectAttempts = 0;
+        updateButtons(true);
+        sessionInfo.textContent = 'Connected • ' + new Date().toLocaleTimeString();
+      } catch (err) {
+        console.error('Start failed', err);
+        setStatus('Start failed: ' + (err?.name || err?.message || 'unknown'), '#ef4444');
+        cameraLabel.textContent = 'No camera';
+        if (scanner) {
+          try { await scanner.clear(); } catch(e) {}
+          scanner = null;
+        }
+        updateButtons(false);
+      } finally {
+        isStarting = false;
+      }
+    }
+
+    async function stopScanner() {
+      if (!scanner) {
+        setStatus('Idle', '#9ca3af');
+        cameraLabel.textContent = 'No camera';
+        updateButtons(false);
+        readerEl.style.display = 'none';
+        return;
+      }
+      setStatus('Stopping camera...', '#f59e0b');
+      try {
+        await scanner.stop();
+        await scanner.clear();
+      } catch (err) {
+        console.warn('Stop error', err);
+        try { await scanner.clear(); } catch(e) {}
+      } finally {
+        scanner = null;
+        readerEl.style.display = 'none';
+        setStatus('Stopped', '#9ca3af');
+        cameraLabel.textContent = 'No camera';
+        updateButtons(false);
+      }
+    }
+
+    function reconnectScanner(force = false) {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (force) reconnectAttempts = 0;
+      if (scanner) {
+        stopScanner().then(() => scheduleReconnect());
+      } else {
+        scheduleReconnect();
+      }
+    }
+
+    function scheduleReconnect() {
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        setStatus('Reconnect failed', '#ef4444');
+        updateButtons(false);
+        return;
+      }
+      const delay = RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts);
+      setStatus('Reconnecting in ' + Math.round(delay/1000) + 's', '#f59e0b');
+      reconnectTimer = setTimeout(async () => {
+        reconnectAttempts++;
+        await startScanner();
+        if (!scanner && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          scheduleReconnect();
+        }
+      }, delay);
+    }
+
+    function onScanSuccess(decodedText, decodedResult) {
+      const ev = new CustomEvent('cardScanned', { detail: { text: decodedText, result: decodedResult } });
+      window.dispatchEvent(ev);
+      addItem({
+        name: decodedText,
+        qty: 1,
+        price: 0,
+        meta: 'scanned',
+        scannedAt: new Date().toISOString()
+      }, true);
+      lastScanned.textContent = decodedText;
+      setStatus('Scanned • ' + new Date().toLocaleTimeString(), '#06b6d4');
+    }
+
+    function onScanError(errorMessage) {
+      // optional debug
+    }
+
+    function updateButtons(running) {
+      startBtn.disabled = running;
+      stopBtn.disabled = !running;
+      reconnectBtn.disabled = false;
+    }
+
+    startBtn.addEventListener('click', startScanner);
+    stopBtn.addEventListener('click', stopScanner);
+    reconnectBtn.addEventListener('click', () => reconnectScanner(true));
+    toggleOverlayBtn.addEventListener('click', () => {
+      overlayVisible = !overlayVisible;
+      readerEl.style.display = overlayVisible && scanner ? 'block' : 'none';
+      toggleOverlayBtn.textContent = overlayVisible ? 'Hide Overlay' : 'Show Overlay';
+    });
+
+    exportCsvBtn.addEventListener('click', exportCSV);
+    importCsvInput.addEventListener('change', e => {
+      const f = e.target.files && e.target.files[0];
+      if (f) importCSVFile(f);
+      e.target.value = '';
+    });
+
+    searchInput.addEventListener('input', e => renderCollection(e.target.value));
+
+    addManualBtn.addEventListener('click', () => {
+      const name = prompt('Card name or code:');
+      if (!name) return;
+      const qty = prompt('Quantity (default 1):', '1');
+      const price = prompt('Price (per unit, optional):', '0');
+      addItem({ name, qty: Number(qty) || 1, price: Number(price) || 0, meta: 'manual' }, true);
+    });
+
+    clearAllBtn.addEventListener('click', () => {
+      if (!confirm('Clear all saved cards? This cannot be undone.')) return;
+      collection = [];
+      saveCollection();
+      renderCollection();
+    });
+
+    collectionBody.addEventListener('click', e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const id = btn.dataset.id;
+      if (action === 'del') {
+        if (confirm('Delete this item?')) deleteItem(id);
+      } else if (action === 'edit') {
+        const item = collection.find(r => r.id === id);
+        if (!item) return;
+        const name = prompt('Name', item.name) || item.name;
+        const qty = prompt('Quantity', String(item.qty)) || item.qty;
+        const price = prompt('Price', String(item.price)) || item.price;
+        const meta = prompt('Notes / meta', item.meta) || item.meta;
+        updateItem(id, { name, qty: Number(qty) || 1, price: Number(price) || 0, meta });
+      } else if (action === 'dup') {
+        duplicateItem(id);
+      }
+    });
+
+    window.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.shiftKey && e.code === 'KeyS') { e.preventDefault(); startScanner(); }
+      if (e.ctrlKey && e.shiftKey && e.code === 'KeyX') { e.preventDefault(); stopScanner(); }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (scanner) stopScanner();
+      }
+    });
+
+    window.addEventListener('pagehide', () => { if (scanner) scanner.clear().catch(()=>{}); scanner = null; });
+    window.addEventListener('beforeunload', () => { if (scanner) scanner.clear().catch(()=>{}); scanner = null; });
+
+    window.addEventListener('cardScanned', ev => {
+      console.log('cardScanned event', ev.detail.text);
+    });
+
+    (function init() {
+      loadCollection();
+      renderCollection();
+      updateButtons(false);
+      setStatus('Idle', '#9ca3af');
+      sessionInfo.textContent = 'Not connected';
+    })();
+  </script>
+</body>
+</html>
